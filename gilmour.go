@@ -3,17 +3,17 @@ package gilmour
 import (
 	"errors"
 	"fmt"
+	"gopkg.in/gilmour-libs/gilmour-e-go.v4/protocol"
+	"gopkg.in/gilmour-libs/gilmour-e-go.v4/ui"
 	"net"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
-
-	"gopkg.in/gilmour-libs/gilmour-e-go.v4/protocol"
-	"gopkg.in/gilmour-libs/gilmour-e-go.v4/ui"
 )
 
-type Callables func(string, handler, *HandlerOpts) (*Subscription, error)
+//type Callables func(...interface{}) (interface{}, error)
 
 func responseTopic(sender string) string {
 	return fmt.Sprintf("gilmour.response.%s", sender)
@@ -381,7 +381,7 @@ func isNetworkError(err error) bool {
 	}
 }
 
-func withRetry(attempts int, job Callables, args ...interface{}) (interface{}, error) {
+func withRetry(attempts int, job interface{}, args ...interface{}) (interface{}, error) {
 	var e net.Error
 	// Why is retry limit not part of retryConf
 	// TODO: take conf as a variable in this function
@@ -391,7 +391,8 @@ func withRetry(attempts int, job Callables, args ...interface{}) (interface{}, e
 		return nil, errors.New("Network Failure")
 	} else {
 		attempts += 1
-		resp, err := job(args)
+		funcValue := reflect.ValueOf(job)
+		resp, err := funcValue.Call(reflect.Value(args))
 		if isNetworkError(err) {
 			time.Sleep(sampleCheckEvery)
 			return withRetry(attempts, job, args)
