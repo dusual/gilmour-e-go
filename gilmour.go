@@ -13,6 +13,8 @@ import (
 	"gopkg.in/gilmour-libs/gilmour-e-go.v4/ui"
 )
 
+type Callables func(string, handler, *HandlerOpts) (*Subscription, error)
+
 func responseTopic(sender string) string {
 	return fmt.Sprintf("gilmour.response.%s", sender)
 }
@@ -371,6 +373,33 @@ func (g *Gilmour) slotDestination(topic string) string {
 	}
 }
 
+func isNetworkError(err error) bool {
+	if err, ok := err.(net.Error); ok {
+		return true
+	} else {
+		return false
+	}
+}
+
+func withRetry(attempts int, job Callables, args ...interface{}) (interface{}, error) {
+	var e net.Error
+	// Why is retry limit not part of retryConf
+	// TODO: take conf as a variable in this function
+	limit := 10
+	sampleCheckEvery := time.Duration(10)
+	if attempts >= limit {
+		return nil, errors.New("Network Failure")
+	} else {
+		attempts += 1
+		resp, err := job(args)
+		if isNetworkError(err) {
+			time.Sleep(sampleCheckEvery)
+			return withRetry(attempts, job, args)
+		}
+	}
+	return nil, nil
+}
+
 // Reply part of Request-Reply design pattern.
 func (g *Gilmour) ReplyTo(topic string, h RequestHandler, opts *HandlerOpts) (*Subscription, error) {
 	if strings.Contains(topic, "*") {
@@ -390,20 +419,8 @@ func (g *Gilmour) ReplyTo(topic string, h RequestHandler, opts *HandlerOpts) (*S
 	}
 
 	var err error
-	for try := 0; try <= g.retryLimit; try += 1 {
-		resp, err := g.subscribe(g.requestDestination(topic), handler, opts)
-
-		if err != nil {
-			if err, ok := err.(net.Error); ok {
-				time.Sleep(g.retryConf.CheckEvery)
-			} else {
-				return resp, err
-			}
-		} else {
-			return resp, err
-		}
-	}
-	return nil, err
+	resp, err := withRetry(0, g.subscribe, g.requestDestination(topic), handler, opts)
+	return resp.(*Subscription), err
 }
 
 //Unsubscribe Previously registered Reply to.
